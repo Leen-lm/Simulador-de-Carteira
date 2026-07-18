@@ -4,7 +4,7 @@ import { Inter } from 'next/font/google';
 const inter = Inter({ subsets: ['latin'] });
 
 export const metadata = {
-  title: 'Simulador de Juros Compostos',
+  title: 'Simulador de Carteira de Investimentos',
   description: 'Comparativo comercial entre uma carteira inercial e uma carteira otimizada.'
 };
 
