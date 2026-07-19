@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import dynamic from 'next/dynamic';
-import { ResponsiveContainer, PieChart, Pie, Cell, Tooltip, Legend } from 'recharts';
+import { ResponsiveContainer, PieChart, Pie, Cell, Tooltip } from 'recharts';
 const PerformanceChart = dynamic(() => import('./PerformanceChart'), { ssr: false });
 import EvolutionTab from './EvolutionTab';
 import GoalCalculator from './GoalCalculator';
@@ -14,19 +14,108 @@ const currency = new Intl.NumberFormat('pt-BR', {
 });
 
 // Cores melhoradas para contraste WCAG AA (ajustado amarelo para laranja mais escuro)
-const COLORS = ['#1f2937', '#f59e0b', '#6b7280', '#9ca3af', '#d1d5db'];
-
-// Cores fixas por ativo — garantem que cada ativo mantenha sempre a mesma cor no gráfico,
-// independente da ordem em que aparece na lista. Ativos não mapeados (nomes customizados
-// digitados pelo usuário) caem no fallback COLORS[index % COLORS.length].
+const FALLBACK_PALETTE = [
+  '#1f2937', '#f59e0b', '#6b7280', '#9ca3af', '#d1d5db',
+  '#3b82f6', '#10b981', '#8b5cf6', '#ef4444', '#14b8a6',
+  '#f97316', '#0ea5e9', '#a855f7', '#84cc16', '#ec4899',
+];
 const ASSET_COLORS = {
   'Caixa (Fundo DI)': '#1f2937',
   'CRI': '#f59e0b',
   'FIIs': '#6b7280',
-  'Criptomoeda': '#f59e0b',
+  'Criptomoeda': '#ef4444',
   'Ações': '#3b82f6',
   'ETFs': '#10b981',
 };
+const FAMILY_BASE_COLOR = {
+  caixa: '#1f2937',
+  cri: '#f59e0b',
+  fii: '#6b7280',
+  etf: '#10b981',
+  acoes: '#3b82f6',
+  cripto: '#ef4444',
+  previdencia: '#8b5cf6',
+};
+function detectAssetFamily(nome) {
+  const n = (nome || '').toLowerCase();
+  if (n.includes('caixa') || n.includes(' di') || n.includes('liquidez')) return 'caixa';
+  if (n.includes('cri')) return 'cri';
+  if (n.includes('fii')) return 'fii';
+  if (n.includes('etf')) return 'etf';
+  if (n.includes('ação') || n.includes('acoes') || n.includes('ações')) return 'acoes';
+  if (n.includes('cripto') || n.includes('bitcoin') || n.includes('btc')) return 'cripto';
+  if (n.includes('previdência') || n.includes('previdencia')) return 'previdencia';
+  return null;
+}
+function hexToHsl(hex) {
+  const r = parseInt(hex.slice(1, 3), 16) / 255;
+  const g = parseInt(hex.slice(3, 5), 16) / 255;
+  const b = parseInt(hex.slice(5, 7), 16) / 255;
+  const max = Math.max(r, g, b);
+  const min = Math.min(r, g, b);
+  let h = 0;
+  let s = 0;
+  const l = (max + min) / 2;
+  if (max !== min) {
+    const d = max - min;
+    s = l > 0.5 ? d / (2 - max - min) : d / (max + min);
+    switch (max) {
+      case r: h = (g - b) / d + (g < b ? 6 : 0); break;
+      case g: h = (b - r) / d + 2; break;
+      default: h = (r - g) / d + 4;
+    }
+    h /= 6;
+  }
+  return [h * 360, s * 100, l * 100];
+}
+function hslToHex(h, s, l) {
+  const sNorm = s / 100;
+  const lNorm = l / 100;
+  const k = (n) => (n + h / 30) % 12;
+  const a = sNorm * Math.min(lNorm, 1 - lNorm);
+  const f = (n) => lNorm - a * Math.max(-1, Math.min(k(n) - 3, Math.min(9 - k(n), 1)));
+  const toHex = (x) => Math.round(255 * x).toString(16).padStart(2, '0');
+  return `#${toHex(f(0))}${toHex(f(8))}${toHex(f(4))}`;
+}
+// Variação de luminosidade da cor-base para o N-ésimo ativo de uma mesma família,
+// mantendo o matiz (identidade visual da categoria) e alternando claro/escuro.
+function shadeForOccurrence(baseHex, occurrenceIndex) {
+  if (occurrenceIndex === 0) return baseHex;
+  const [h, s, l] = hexToHsl(baseHex);
+  const step = 10;
+  const direction = occurrenceIndex % 2 === 0 ? 1 : -1;
+  const magnitude = Math.ceil(occurrenceIndex / 2) * step;
+  const newL = Math.min(85, Math.max(15, l + direction * magnitude));
+  return hslToHex(h, Math.min(90, s), newL);
+}
+// Mapa { id do ativo -> cor }, sem repetir cor entre ativos diferentes:
+// 1) nome exato conhecido, 2) família detectada (variando o tom por ocorrência),
+// 3) paleta ampliada como último recurso, ciclando só entre os "sem categoria".
+function buildAssetColorMap(entries) {
+  const familyCounts = {};
+  let fallbackCount = 0;
+  const map = {};
+
+  entries.forEach((entry) => {
+    if (ASSET_COLORS[entry.nomeDoAtivo]) {
+      map[entry.id] = ASSET_COLORS[entry.nomeDoAtivo];
+      return;
+    }
+
+    const family = detectAssetFamily(entry.nomeDoAtivo);
+    if (family && FAMILY_BASE_COLOR[family]) {
+      const occurrence = familyCounts[family] || 0;
+      familyCounts[family] = occurrence + 1;
+      map[entry.id] = shadeForOccurrence(FAMILY_BASE_COLOR[family], occurrence);
+      return;
+    }
+
+    map[entry.id] = FALLBACK_PALETTE[fallbackCount % FALLBACK_PALETTE.length];
+    fallbackCount += 1;
+  });
+
+  return map;
+}
 
 function parseCurrencyString(value) {
   if (!value) return 0;
@@ -103,7 +192,7 @@ export default function CompoundSimulator() {
       return (Math.max(L1, L2) + 0.05) / (Math.min(L1, L2) + 0.05);
     };
 
-    COLORS.forEach((c) => {
+    FALLBACK_PALETTE.forEach((c) => {
       const rgb = hexToRgb(c);
       if (!rgb) return;
       const cr = contrastRatio([255, 255, 255], rgb);
@@ -153,6 +242,7 @@ export default function CompoundSimulator() {
   const numericAssetValues = useMemo(() => assets.map((a) => ({ ...a, numericValor: Math.max(0, parseCurrencyString(a.valor)), numericTaxa: Number(a.taxaAnual) || 0 })), [assets]);
   const principalSum = useMemo(() => numericAssetValues.reduce((sum, a) => sum + a.numericValor, 0), [numericAssetValues]);
   const allocationData = useMemo(() => numericAssetValues.map((a) => ({ id: a.id, nomeDoAtivo: a.nomeDoAtivo, valor: a.numericValor, percent: principalSum ? (a.numericValor / principalSum) * 100 : 0 })), [numericAssetValues, principalSum]);
+  const assetColorMap = useMemo(() => buildAssetColorMap(allocationData), [allocationData]);
 
   // Weighted average (computed value for inertia)
   const weightedRate = useMemo(() => {
@@ -489,17 +579,16 @@ export default function CompoundSimulator() {
                       dataKey="valor"
                       nameKey="nomeDoAtivo"
                       cx="50%"
-                      cy="50%"
+                      cy="45%"
                       innerRadius={120}
                       outerRadius={170}
                       paddingAngle={2}
                     >
-                      {allocationData.map((entry, index) => (
-                        <Cell key={`cell-${entry.id}`} fill={ASSET_COLORS[entry.nomeDoAtivo] || COLORS[index % COLORS.length]} />
+                      {allocationData.map((entry) => (
+                        <Cell key={`cell-${entry.id}`} fill={assetColorMap[entry.id]} />
                       ))}
                     </Pie>
                     <Tooltip formatter={(value) => currency.format(value)} />
-                    <Legend verticalAlign="bottom" height={36} />
                   </PieChart>
                 </ResponsiveContainer>
 
@@ -525,7 +614,15 @@ export default function CompoundSimulator() {
                   <tbody className="text-gray-700">
                     {allocationData.map((entry) => (
                       <tr key={entry.id} className="border-t">
-                        <td className="py-2">{entry.nomeDoAtivo}</td>
+                        <td className="py-2">
+                          <span className="inline-flex items-center gap-2">
+                            <span
+                              className="inline-block h-3 w-3 rounded-sm flex-shrink-0"
+                              style={{ backgroundColor: assetColorMap[entry.id] }}
+                            />
+                            {entry.nomeDoAtivo}
+                          </span>
+                        </td>
                         <td className="py-2 text-right">{currency.format(entry.valor)}</td>
                         <td className="py-2 text-right">{entry.percent ? `${entry.percent.toFixed(1)}%` : '—'}</td>
                       </tr>
