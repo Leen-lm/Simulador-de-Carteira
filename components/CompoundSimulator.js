@@ -357,12 +357,8 @@ export default function CompoundSimulator() {
       {/* XP Header - Preto */}
       <header className="bg-black text-white px-10 py-4 sm:px-6 lg:px-8">
         <div className="mx-auto flex max-w-7xl items-center justify-between">
-          {/* XP Logo */}
-          <div className="flex items-center gap-3 ml-8">
-            <div className="flex items-center justify-center rounded-[4px] border border-white w-6 h-6">
-              <img src="/Logotipo_da_XP_Investimentos.svg.webp" alt="XP Logo" className="bg-white rounded-[3px] h-[22px] w-auto block" />
-            </div>
-            <span className="ml-1 text-sm font-semibold text-white">Simulador de Carteira</span>
+          <div className="flex items-center gap-3">
+            <span className="ml-8 text-sm font-semibold text-white">Simulador de Carteira</span>
           </div>
         </div>
       </header>
